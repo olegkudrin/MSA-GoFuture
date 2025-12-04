@@ -1,0 +1,92 @@
+@startuml C4_Failover_Global
+
+skinparam dpi 150
+
+!include <C4/C4_Container>
+
+title GoFuture - C4 (глобальный failover между регионами)
+
+AddElementTag("domain", $bgColor="Teal")
+AddElementTag("security", $bgColor="Indigo")
+AddElementTag("infra", $bgColor="Gray")
+
+Person(user, "Пользователь (пассажир/водитель)", "Использует мобильное приложение")
+
+System_Boundary(global_edge, "Глобальный периметр") {
+    Container(global_dns, "Global DNS / Geo-LB", "Geo DNS", "Маршрутизация трафика по регионам", $tags="security")
+    Container(global_waf, "Global WAF", "Cloud WAF", "Фильтрация, DDoS/WAF защита", $tags="security")
+
+    Rel(user, global_dns, "HTTPS")
+    Rel(global_dns, global_waf, "Географическая маршрутизация", "HTTPS")
+}
+
+System_Boundary(region_eu, "Region-EU (Primary Core)") {
+    Container(eu_api_gw, "API Gateway (EU)", "API Gateway", "Входной API региона", $tags="infra")
+    Container(eu_k8s, "Kubernetes (EU)", "k8s", "Доменные микросервисы", $tags="domain")
+    ContainerQueue(eu_kafka, "Kafka (EU)", "Kafka", "Локальный event bus", $tags="infra")
+    ContainerDb(eu_db, "DB Cluster (EU)", "PostgreSQL/ClickHouse", "Локальные БД сервисов", $tags="infra")
+}
+
+System_Boundary(region_sea, "Region-SEA (Primary SEA)") {
+    Container(sea_api_gw, "API Gateway (SEA)", "API Gateway", "Входной API региона", $tags="infra")
+    Container(sea_k8s, "Kubernetes (SEA)", "k8s", "Доменные микросервисы", $tags="domain")
+    ContainerQueue(sea_kafka, "Kafka (SEA)", "Kafka", "Локальный event bus", $tags="infra")
+    ContainerDb(sea_db, "DB Cluster (SEA)", "PostgreSQL/ClickHouse", "Локальные БД сервисов", $tags="infra")
+}
+
+System_Boundary(region_sa, "Region-SA (Primary SA)") {
+    Container(sa_api_gw, "API Gateway (SA)", "API Gateway", "Входной API региона", $tags="infra")
+    Container(sa_k8s, "Kubernetes (SA)", "k8s", "Доменные микросервисы", $tags="domain")
+    ContainerQueue(sa_kafka, "Kafka (SA)", "Kafka", "Локальный event bus", $tags="infra")
+    ContainerDb(sa_db, "DB Cluster (SA)", "PostgreSQL/ClickHouse", "Локальные БД сервисов", $tags="infra")
+}
+
+System_Boundary(region_dr, "Region-DR (Global DR)") {
+    Container(dr_api_gw, "API Gateway (DR)", "API Gateway", "Резервный входной API", $tags="infra")
+    Container(dr_k8s, "Kubernetes (DR)", "k8s", "Резервные доменные сервисы", $tags="domain")
+    ContainerQueue(dr_kafka, "Kafka (DR)", "Kafka", "Резервный event bus", $tags="infra")
+    ContainerDb(dr_db, "DB Cluster (DR)", "PostgreSQL/ClickHouse", "Резервные БД", $tags="infra")
+}
+
+Rel(global_waf, eu_api_gw, "Трафик пользователей Европы / по умолчанию", "HTTPS")
+Rel(global_waf, sea_api_gw, "Трафик пользователей ЮВА", "HTTPS")
+Rel(global_waf, sa_api_gw, "Трафик пользователей Южной Америки", "HTTPS")
+
+Rel(eu_api_gw, eu_k8s, "Маршрутизация запросов", "HTTP/gRPC")
+Rel(sea_api_gw, sea_k8s, "Маршрутизация запросов", "HTTP/gRPC")
+Rel(sa_api_gw, sa_k8s, "Маршрутизация запросов", "HTTP/gRPC")
+Rel(dr_api_gw, dr_k8s, "Маршрутизация запросов", "HTTP/gRPC")
+
+Rel(eu_k8s, eu_kafka, "Публикует/читает события", "Kafka")
+Rel(sea_k8s, sea_kafka, "Публикует/читает события", "Kafka")
+Rel(sa_k8s, sa_kafka, "Публикует/читает события", "Kafka")
+Rel(dr_k8s, dr_kafka, "Публикует/читает события", "Kafka")
+
+Rel(eu_k8s, eu_db, "Читает/пишет данные", "SQL")
+Rel(sea_k8s, sea_db, "Читает/пишет данные", "SQL")
+Rel(sa_k8s, sa_db, "Читает/пишет данные", "SQL")
+Rel(dr_k8s, dr_db, "Читает/пишет данные", "SQL")
+
+' Кросс-регионная репликация БД (асинхронно)
+' Двусторонняя репликация между EU и SEA/SA для взаимного резервирования
+Rel_Back(eu_db, sea_db, "CDC / logical replication (critical domains)", "async")
+Rel_Back(eu_db, sa_db, "CDC / logical replication (critical domains)", "async")
+' Односторонняя репликация из всех активных регионов в DR для аварийного восстановления
+Rel_Back(eu_db, dr_db, "CDC / logical replication (backup)", "async")
+Rel_Back(sea_db, dr_db, "CDC / logical replication (backup)", "async")
+Rel_Back(sa_db, dr_db, "CDC / logical replication (backup)", "async")
+
+' Кросс-регионная репликация Kafka (MirrorMaker)
+Rel_Back(sea_kafka, dr_kafka, "MirrorMaker 2 (ключевые топики)", "async")
+Rel_Back(sa_kafka, dr_kafka, "MirrorMaker 2 (ключевые топики)", "async")
+
+note as note1
+Диаграмма отражает ключевые элементы для failover:
+- глобальный DNS/WAF переключает трафик между регионами;
+- данные и события реплицируются асинхронно в EU/DR;
+- при отказе региона SEA/SA трафик и обработка переезжают в EU или DR.
+end note
+
+@enduml
+
+

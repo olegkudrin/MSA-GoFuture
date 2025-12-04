@@ -1,0 +1,52 @@
+@startuml C3_Onboarding_Flow
+
+skinparam dpi 150
+
+!include <C4/C4_Component>
+
+title GoFuture - C3 (Логика онбординга нового партнера)
+
+AddElementTag("domain", $bgColor="Teal")
+AddElementTag("security", $bgColor="Indigo", $fontColor="White")
+
+Container_Boundary(partner_portal, "Partner Portal") {
+    Component(ui_onboarding, "Onboarding UI", "SPA", "Форма регистрации и настройки нового партнера")
+    Component(ui_tenant_settings, "Tenant Settings UI", "SPA", "Управление настройками и пользователями тенанта")
+}
+
+Container_Boundary(onboarding_service, "Onboarding Service") {
+    Component(flow_orchestrator, "Onboarding Orchestrator", "Service", "Оркестрация шагов онбординга (Saga/Workflow)")
+    Component(tenant_validator, "Tenant Validator", "Service", "Проверка данных партнера (уникальность, лимиты, домены)")
+    Component(provisioning_adapter, "Provisioning Adapter", "Service", "Создание ресурсов: БД, namespaces, IAM")
+    Component(notification_component, "Notification Component", "Service", "Отправка писем/уведомлений о статусе онбординга")
+}
+
+Container_Boundary(platform_services, "Platform Services") {
+    Component(tenant_mgmt_component, "Tenant Management Component", "Service", "CRUD по тенантам, статусы, квоты")
+    Component(iam_admin_api, "IAM Admin API", "Keycloak Admin", "Создание realm/clients, ролей и групп")
+    Component(db_provisioner, "DB Provisioner", "Automation", "Создание БД/схемы/юзеров под тенант")
+    Component(config_store, "Tenant Config Store", "Service", "Хранение бизнес-настроек и фичей по тенантам")
+    Component(audit_log, "Audit Log", "Service", "Аудит действий онбординга и изменений настроек")
+}
+
+Rel(ui_onboarding, flow_orchestrator, "Старт онбординга, ввод данных", "HTTPS/JSON")
+Rel(flow_orchestrator, tenant_validator, "Валидация входных данных", "gRPC/HTTP")
+Rel(tenant_validator, tenant_mgmt_component, "Проверка уникальности и лимитов", "gRPC/HTTP")
+
+Rel(flow_orchestrator, provisioning_adapter, "Запуск шага создания ресурсов", "gRPC/HTTP")
+
+Rel(provisioning_adapter, db_provisioner, "Создание БД/схем/пользователей", "Automation Script/API")
+Rel(provisioning_adapter, iam_admin_api, "Создание realm/clients, ролей, групп", "Admin API")
+Rel(provisioning_adapter, config_store, "Инициализация конфигураций по умолчанию", "gRPC/HTTP")
+Rel(provisioning_adapter, tenant_mgmt_component, "Обновление статуса тенанта (Active/Failed)", "gRPC/HTTP")
+
+Rel(flow_orchestrator, notification_component, "Статусы онбординга (успех/ошибка)", "Events")
+Rel(notification_component, audit_log, "Запись аудита по шагам онбординга", "Events")
+
+Rel(ui_tenant_settings, tenant_mgmt_component, "Просмотр и изменение настроек тенанта", "HTTPS/JSON")
+Rel(ui_tenant_settings, config_store, "Управление бизнес-настройками и фичами", "HTTPS/JSON")
+Rel(ui_tenant_settings, audit_log, "Просмотр истории изменений", "HTTPS/JSON")
+
+@enduml
+
+
