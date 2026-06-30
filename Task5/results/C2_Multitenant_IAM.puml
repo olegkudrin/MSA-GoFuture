@@ -1,0 +1,95 @@
+@startuml C2_Multitenant_IAM
+
+' skinparam dpi 150
+
+!include <C4/C4_Container>
+
+title GoFuture - C2 (Мультитенантная платформа, IAM и мониторинг)
+
+AddElementTag("domain", $bgColor="Teal")
+AddElementTag("security", $bgColor="Indigo", $fontColor="White")
+AddElementTag("monitoring", $bgColor="Purple")
+
+Person(partner_admin, "Partner Admin", "Администратор партнера (такси-сервис, банк и т.п.)")
+Person(gf_platform_admin, "GoFuture Platform Admin", "Глобальный администратор платформы")
+
+System_Boundary(gofuture_multitenant, "GoFuture Multitenant Platform") {
+
+    ' Точка входа и портал партнеров
+    Container(partner_portal, "Partner Portal", "Web (React/Vue)", "UI для партнеров: управление тенантом, онбординг водителей и пользователей", $tags="domain")
+    Container(api_gateway, "API Gateway", "API Gateway", "Единая точка входа в API платформы", $tags="security")
+
+    ' IAM и SSO
+    Container(iam, "IAM Service", "Keycloak/Auth0", "Централизованная аутентификация, SSO и управление ролями", $tags="security")
+    Container(idp_corp, "Corporate IdP", "SAML/OIDC IdP", "Внешний IdP партнера для SSO", $tags="security")
+
+    ' Управление тенантами и онбординг
+    Container(tenant_mgmt, "Tenant Management Service", "Python/Go", "Модель тенанта, лимиты, настройки, статусы", $tags="domain")
+    Container(onboarding_svc, "Onboarding Service", "Python/Go", "Автоматизированный процесс подключения нового партнера", $tags="domain")
+
+    ' Изоляция данных
+    ContainerDb(tenant_db_cluster, "Tenant Databases", "PostgreSQL", "Отдельная БД/схема на тенант (логическая изоляция данных)", $tags="security")
+    Container(tenant_config_svc, "Tenant Config Service", "Python/Go", "Хранение конфигураций на тенант (фичи, квоты, маршрутизация)", $tags="domain")
+
+    ' Доменные микросервисы (мультитенантный режим)
+    Container(booking_svc, "Booking Service", "Python/Go", "Операции бронирований в режиме мультитенантности", $tags="domain")
+    Container(pricing_svc, "Pricing Service", "Python/Go", "Динамическое ценообразование с учетом политик партнера", $tags="domain")
+    Container(payments_svc, "Payments Service", "Python/Go", "Платежи с изоляцией финансовых данных по тенантам", $tags="domain")
+
+    ' Мониторинг и логирование
+    Container(monitoring, "Monitoring Stack", "Prometheus + Grafana", "Метрики по тенантам, алерты SLO/SLA", $tags="monitoring")
+    Container(logging, "Logging Stack", "Loki/ELK", "Логи с меткой tenantId", $tags="monitoring")
+    Container(tracing, "Tracing", "Jaeger/Tempo", "Трейсы запросов c tenantId", $tags="monitoring")
+
+    ' Связи пользователей
+    Rel(partner_admin, partner_portal, "Использует", "HTTPS")
+    Rel(gf_platform_admin, partner_portal, "Управляет платформой", "HTTPS")
+
+    ' Портал и API Gateway
+    Rel(partner_portal, api_gateway, "API-вызовы", "HTTPS/REST")
+
+    ' Аутентификация и SSO
+    Rel(api_gateway, iam, "Проверка токенов, выдача JWT", "OAuth2/OIDC")
+    Rel(partner_portal, iam, "Login/SSO", "OIDC")
+    Rel(iam, idp_corp, "Федерация/SSO", "SAML/OIDC")
+
+    ' Управление тенантами и онбординг
+    Rel(partner_portal, onboarding_svc, "Создание и настройка нового партнера", "HTTPS/REST via API Gateway")
+    Rel(onboarding_svc, tenant_mgmt, "Создание записи о тенанте, статусы", "gRPC/HTTP")
+    Rel(onboarding_svc, iam, "Создание realm/clients, ролей и групп для тенанта", "Admin API")
+    Rel(onboarding_svc, tenant_db_cluster, "Создание БД/схемы/тенант-шейдинга", "SQL/API")
+    Rel(onboarding_svc, tenant_config_svc, "Инициализация конфигурации тенанта", "gRPC/HTTP")
+
+    ' Использование конфигураций и изоляция данных
+    Rel(api_gateway, tenant_config_svc, "Определение tenantId и маршрутизация", "HTTP/gRPC")
+    Rel(booking_svc, tenant_db_cluster, "Чтение/запись данных по tenantId", "SQL")
+    Rel(pricing_svc, tenant_db_cluster, "Чтение политик и тарифов по tenantId", "SQL")
+    Rel(payments_svc, tenant_db_cluster, "Финансовые данные по tenantId", "SQL")
+
+    ' Доменные сервисы и IAM
+    Rel(booking_svc, iam, "Проверка прав доступа", "JWT introspection")
+    Rel(payments_svc, iam, "Проверка ролей (финансы)", "JWT claims")
+
+    ' Мониторинг
+    Rel(booking_svc, monitoring, "Метрики с label=tenantId, service", "Prometheus metrics")
+    Rel(pricing_svc, monitoring, "Метрики с label=tenantId", "Prometheus metrics")
+    Rel(payments_svc, monitoring, "Метрики с label=tenantId", "Prometheus metrics")
+    Rel(tenant_mgmt, monitoring, "Метрики статусов тенантов", "Prometheus metrics")
+
+    Rel(booking_svc, logging, "Логи c tenantId", "Loki/ELK")
+    Rel(pricing_svc, logging, "Логи c tenantId", "Loki/ELK")
+    Rel(payments_svc, logging, "Логи c tenantId", "Loki/ELK")
+    Rel(partner_portal, logging, "Аудит действий администраторов партнеров", "Loki/ELK")
+
+    Rel(booking_svc, tracing, "Трейсы запросов с tenantId", "OpenTelemetry")
+    Rel(pricing_svc, tracing, "Трейсы запросов с tenantId", "OpenTelemetry")
+    Rel(payments_svc, tracing, "Трейсы запросов с tenantId", "OpenTelemetry")
+
+    ' Доступ к мониторингу
+    Rel(gf_platform_admin, monitoring, "Глобальные дашборды по всем тенантам", "HTTPS")
+    Rel(partner_admin, monitoring, "Ограниченный доступ к метрикам только своего тенанта (через IAM)", "HTTPS")
+}
+
+@enduml
+
+

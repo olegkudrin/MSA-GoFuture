@@ -1,0 +1,101 @@
+@startuml C4_DataPipeline
+
+skinparam dpi 150
+
+!include <C4/C4_Container>
+
+title Пайплайн данных для ML-платформы и BI-инструментов
+
+AddElementTag("domain", $bgColor="Teal")
+AddElementTag("data", $bgColor="SteelBlue")
+AddElementTag("ml", $bgColor="DarkGreen")
+AddElementTag("bi", $bgColor="Purple")
+
+System_Boundary(data_pipeline, "Data Pipeline & ML Platform") {
+
+    ' Источники данных - микросервисы
+    Container(booking_service, "Booking Service", "Python/Go", "События бронирований", $tags="domain")
+    Container(driver_service, "Driver Service", "Python/Go", "События водителей", $tags="domain")
+    Container(pricing_service, "Pricing Service", "Python/Go", "События ценообразования", $tags="domain")
+    Container(payments_service, "Payments Service", "Python/Go", "События платежей", $tags="domain")
+    Container(fraud_service, "Fraud Service", "Python/ML", "События фрода", $tags="domain")
+
+    ' Event Bus
+    ContainerQueue(event_bus, "Event Bus", "Apache Kafka", "Поток событий от всех микросервисов", $tags="data")
+
+    ' Stream Processing
+    Container(stream_processor, "Stream Processor", "Apache Flink", "Обработка событий в реальном времени", $tags="data")
+    Container(schema_registry, "Schema Registry", "Confluent Schema Registry", "Валидация схем событий", $tags="data")
+
+    ' Data Storage
+    Container(data_lake, "Data Lake", "S3/MinIO", "Хранилище сырых данных (raw events)", $tags="data")
+    Container(processed_data_store, "Processed Data Store", "Parquet/S3", "Обработанные данные для ML", $tags="data")
+    Container(feature_store, "Feature Store", "Redis + PostgreSQL", "Хранилище фич для ML-моделей", $tags="ml")
+    Container(clickhouse, "ClickHouse", "ClickHouse", "Аналитическая БД для BI", $tags="bi")
+
+    ' ML Platform
+    Container(ml_training, "ML Training Pipeline", "Kubeflow/Airflow", "Обучение моделей ценообразования, спроса, фрода", $tags="ml")
+    Container(model_registry, "Model Registry", "MLflow", "Версионирование и управление моделями", $tags="ml")
+    Container(model_serving, "Model Serving", "KServe/Seldon", "Развертывание моделей для inference", $tags="ml")
+
+    ' BI Tools
+    Container(datalens, "DataLens", "BI Tool", "Визуализация и аналитика", $tags="bi")
+    Container(analytics_service, "Analytics Service", "Python/Go", "Агрегация данных для BI", $tags="bi")
+
+    ' Data Quality
+    Container(data_quality, "Data Quality Service", "Great Expectations", "Проверка качества данных", $tags="data")
+
+    ' Публикация событий в Kafka
+    Rel(booking_service, event_bus, "Публикует события", "Kafka")
+    Rel(driver_service, event_bus, "Публикует события", "Kafka")
+    Rel(pricing_service, event_bus, "Публикует события", "Kafka")
+    Rel(payments_service, event_bus, "Публикует события", "Kafka")
+    Rel(fraud_service, event_bus, "Публикует события", "Kafka")
+
+    ' Schema Registry
+    Rel(booking_service, schema_registry, "Регистрация схем", "HTTP")
+    Rel(driver_service, schema_registry, "Регистрация схем", "HTTP")
+    Rel(pricing_service, schema_registry, "Регистрация схем", "HTTP")
+    Rel(stream_processor, schema_registry, "Валидация схем", "HTTP")
+
+    ' Stream Processing
+    Rel(event_bus, stream_processor, "Читает события", "Kafka")
+    Rel(stream_processor, event_bus, "Публикует обработанные события", "Kafka")
+
+    ' Data Lake - сохранение сырых данных
+    Rel(event_bus, data_lake, "Kafka Connect: сохранение сырых событий", "Kafka Connect")
+
+    ' Обработка данных для ML
+    Rel(stream_processor, processed_data_store, "Сохраняет обработанные данные", "Parquet")
+    Rel(stream_processor, feature_store, "Обновляет фичи в реальном времени", "Redis API")
+
+    ' ML Training Pipeline
+    Rel(processed_data_store, ml_training, "Читает данные для обучения", "S3 API")
+    Rel(data_lake, ml_training, "Читает исторические данные", "S3 API")
+    Rel(ml_training, model_registry, "Сохраняет обученные модели", "MLflow API")
+    Rel(model_registry, model_serving, "Развертывает модели", "MLflow API")
+
+    ' Model Serving для сервисов
+    Rel(pricing_service, model_serving, "Запросы к моделям ценообразования", "REST/gRPC")
+    Rel(fraud_service, model_serving, "Запросы к моделям фрода", "REST/gRPC")
+    Rel(model_serving, feature_store, "Читает фичи для inference", "Redis API")
+
+    ' BI Pipeline
+    Rel(stream_processor, clickhouse, "Загружает агрегированные данные", "ClickHouse API")
+    Rel(data_lake, analytics_service, "ETL для аналитики", "S3 API")
+    Rel(analytics_service, clickhouse, "Загружает данные", "ClickHouse API")
+    Rel(clickhouse, datalens, "Запросы к данным", "SQL")
+
+    ' Data Quality
+    Rel(stream_processor, data_quality, "Проверка качества данных", "Events")
+    Rel(data_lake, data_quality, "Проверка качества сырых данных", "S3 API")
+    Rel(data_quality, processed_data_store, "Валидированные данные", "Parquet")
+}
+
+' Внешние системы
+System_Ext(ml_models, "ML Models", "Модели ценообразования, прогноза спроса, фрода")
+
+Rel(model_serving, ml_models, "Использует модели", "Inference API")
+
+@enduml
+

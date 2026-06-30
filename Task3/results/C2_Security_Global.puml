@@ -1,0 +1,63 @@
+@startuml C2_Security_Global
+
+skinparam dpi 150
+
+!include <C4/C4_Container>
+
+title GoFuture - C2 (периметр безопасности и глобальный доступ)
+
+AddElementTag("legacy", $bgColor="DarkSlateBlue")
+AddElementTag("domain", $bgColor="Teal")
+AddElementTag("security", $bgColor="Indigo", $fontColor="White")
+
+Person(passenger, "Пассажир", "Заказывает поездки")
+Person(driver, "Водитель", "Принимает заказы")
+Person(corporate_user, "Корпоративный клиент", "Управляет корпоративными поездками")
+Person(admin, "Администратор", "Управляет системой")
+
+System_Boundary(global_edge, "Глобальный периметр GoFuture") {
+
+    Container(global_dns, "Global DNS / Geo-LB", "Route53 / Cloud DNS", "Геомаршрутизация к ближайшему региону", $tags="security")
+    Container(global_waf, "Global WAF", "Cloud WAF", "Фильтрация трафика, защита L7, rate limiting", $tags="security")
+
+    Rel(passenger,      global_dns, "HTTPS")
+    Rel(driver,         global_dns, "HTTPS")
+    Rel(corporate_user, global_dns, "HTTPS")
+    Rel(admin,          global_dns, "HTTPS")
+
+    Rel(global_dns, global_waf, "Маршрутизация трафика", "HTTPS")
+
+    System_Boundary(region_eu, "Region-EU") {
+        Container(eu_waf, "Regional WAF/Firewall (EU)", "WAF + Security Groups", "Защита периметра региона", $tags="security")
+        Container(eu_api_gw, "API Gateway (EU)", "API Gateway", "Единая точка входа в регион")
+        Container(eu_k8s, "Kubernetes Cluster (EU)", "k8s", "Доменные микросервисы", $tags="domain")
+    }
+
+    System_Boundary(region_sea, "Region-SEA") {
+        Container(sea_waf, "Regional WAF/Firewall (SEA)", "WAF + Security Groups", "Защита периметра региона", $tags="security")
+        Container(sea_api_gw, "API Gateway (SEA)", "API Gateway", "Единая точка входа в регион")
+        Container(sea_k8s, "Kubernetes Cluster (SEA)", "k8s", "Доменные микросервисы", $tags="domain")
+    }
+
+    System_Boundary(region_sa, "Region-SA") {
+        Container(sa_waf, "Regional WAF/Firewall (SA)", "WAF + Security Groups", "Защита периметра региона", $tags="security")
+        Container(sa_api_gw, "API Gateway (SA)", "API Gateway", "Единая точка входа в регион")
+        Container(sa_k8s, "Kubernetes Cluster (SA)", "k8s", "Доменные микросервисы", $tags="domain")
+    }
+
+    Rel(global_waf, eu_waf, "Геомаршрутизация к ближайшему региону", "HTTPS")
+    Rel(global_waf, sea_waf, "Геомаршрутизация к ближайшему региону", "HTTPS")
+    Rel(global_waf, sa_waf, "Геомаршрутизация к ближайшему региону", "HTTPS")
+
+    Rel(eu_waf, eu_api_gw, "Пропускает только валидный трафик", "HTTPS")
+    Rel(sea_waf, sea_api_gw, "Пропускает только валидный трафик", "HTTPS")
+    Rel(sa_waf, sa_api_gw, "Пропускает только валидный трафик", "HTTPS")
+
+    Rel(eu_api_gw, eu_k8s, "Маршрутизация запросов к сервисам", "HTTP/gRPC")
+    Rel(sea_api_gw, sea_k8s, "Маршрутизация запросов к сервисам", "HTTP/gRPC")
+    Rel(sa_api_gw, sa_k8s, "Маршрутизация запросов к сервисам", "HTTP/gRPC")
+}
+
+@enduml
+
+

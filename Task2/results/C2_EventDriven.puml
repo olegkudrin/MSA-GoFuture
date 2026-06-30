@@ -1,0 +1,71 @@
+@startuml C2_EventDriven
+
+skinparam dpi 150
+
+!include <C4/C4_Container>
+
+title Платформа GoFuture (Event-Driven архитектура)
+
+AddElementTag("domain", $bgColor="Teal")
+AddElementTag("event", $bgColor="SteelBlue")
+
+System_Boundary(gofuture_platform, "GoFuture Platform") {
+
+    ' Доменные микросервисы
+    Container(booking_service, "Booking Service", "Python/Go", "Управление бронированиями и оркестрация поездок", $tags="domain")
+    Container(driver_service, "Driver Service", "Python/Go", "Управление водителями, статусами, доступностью", $tags="domain")
+    Container(pricing_service, "Pricing Service", "Python/Go", "Динамическое ценообразование в реальном времени", $tags="domain")
+    Container(payments_service, "Payments Service", "Python/Go", "Обработка платежей от пассажиров", $tags="domain")
+    Container(payouts_service, "Payouts Service", "Python/Go", "Выплаты водителям", $tags="domain")
+    Container(notification_service, "Notification Service", "Python/Go", "Отправка push-уведомлений", $tags="domain")
+    Container(geography_service, "Geography Service", "Python/Go", "Геопоиск, маршрутизация, карты", $tags="domain")
+    Container(analytics_service, "Analytics Service", "Python/Go", "Сбор и обработка аналитики", $tags="domain")
+    Container(fraud_service, "Fraud Service", "Python/ML", "Обнаружение мошенничества с ML", $tags="domain")
+
+    ' Синхронные вызовы между сервисами
+    Rel(booking_service,  driver_service,    "Поиск доступных водителей", "gRPC/HTTP")
+    Rel(booking_service,  pricing_service,   "Расчет стоимости",          "gRPC/HTTP")
+    Rel(booking_service,  geography_service, "Расчет маршрута",           "gRPC/HTTP")
+    Rel(payments_service, fraud_service,     "Проверка на фрод",          "gRPC/HTTP")
+
+    ' Инфраструктура обмена сообщениями
+    ContainerQueue(event_bus, "Event Bus", "Apache Kafka", "Асинхронная коммуникация между сервисами", $tags="event")
+    ContainerQueue(dlq, "Dead Letter Queue", "Kafka DLQ Topics", "События, не обработанные после retry", $tags="event")
+    Container(stream_processor, "Stream Processor", "Apache Flink", "Обработка событий в реальном времени", $tags="event")
+    Container(schema_registry, "Schema Registry", "Confluent Schema Registry", "Управление схемами событий", $tags="event")
+
+    ' Обмен сообщениями доменных микросервисов
+    Rel(booking_service,      event_bus, "Публикует события бронирований и Saga", "Kafka")
+    Rel(driver_service,       event_bus, "Публикует события водителей",           "Kafka")
+    Rel(pricing_service,      event_bus, "Публикует события ценообразования",     "Kafka")
+    Rel(payments_service,     event_bus, "Публикует события платежей",            "Kafka")
+    Rel(payouts_service,      event_bus, "Публикует события выплат",              "Kafka")
+    Rel(geography_service,    event_bus, "Публикует события маршрутизации",       "Kafka")
+    Rel(fraud_service,        event_bus, "Публикует события фрода",               "Kafka")
+    Rel(notification_service, event_bus, "Публикует события уведомлений",         "Kafka")
+    '
+    Rel(event_bus, notification_service, "Подписка на все события",               "Kafka")
+    Rel(event_bus, analytics_service,    "Подписка на все доменные события",      "Kafka")
+    Rel(event_bus, fraud_service,        "Подписка на бронирования и платежи",    "Kafka")
+    Rel(event_bus, stream_processor,     "Подписка на события для обработки",     "Kafka")
+    Rel(event_bus, booking_service,      "Подписка на события Saga оркестрации",  "Kafka")
+
+    ' Stream Processor публикует обработанные события
+    Rel(stream_processor, event_bus, "Публикует обработанные события", "Kafka")
+
+    ' Подписка на обработанные Flink события
+    Rel(event_bus, pricing_service, "Подписка: агрегированные данные от Flink", "Kafka")
+    Rel(event_bus, fraud_service,   "Подписка: события об аномалиях",           "Kafka")
+
+    ' Dead Letter Queue
+    Rel(event_bus, dlq, "Необработанные события", "Kafka")
+
+    ' Schema Registry
+    Rel(booking_service,  schema_registry, "Схемы событий", "HTTP")
+    Rel(driver_service,   schema_registry, "Схемы событий", "HTTP")
+    Rel(pricing_service,  schema_registry, "Схемы событий", "HTTP")
+    Rel(payments_service, schema_registry, "Схемы событий", "HTTP")
+    Rel(stream_processor, schema_registry, "Схемы событий", "HTTP")
+}
+
+@enduml

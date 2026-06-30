@@ -1,0 +1,43 @@
+@startuml C2_Infrastructure
+
+skinparam dpi 150
+
+!include <C4/C4_Container>
+
+title Платформа GoFuture (мониторинг, логи, трейсинг)
+
+AddElementTag("domain", $bgColor="Teal")
+
+System_Boundary(gofuture_platform, "GoFuture Platform") {
+    Container(domain_service, "Domain Service", $tags="domain")
+
+    Container(config_service, "Config Service", "Consul/etcd", "Централизованная конфигурация")
+    Rel(domain_service, config_service, "Получение конфигурации", "HTTP")
+
+    Container(prometheus, "Prometheus", "Monitoring", "Сбор метрик")
+    Container(grafana, "Grafana", "Dashboards", "Визуализация метрик")
+    Container(loki, "Loki", "Log Aggregation", "Централизованные логи")
+    Container(jaeger, "Jaeger", "Distributed Tracing", "Трассировка запросов")
+    Container(alertmanager, "Alertmanager", "Alerting", "Управление алертами")
+
+    Rel(domain_service, prometheus, "Метрики", "Prometheus format")
+    Rel(domain_service, jaeger, "Трейсы", "OpenTelemetry")
+    Rel(domain_service, loki, "Логи", "Loki API")
+
+    Rel(loki, grafana, "Отображение", "LogQL")
+    Rel(prometheus, grafana, "Визуализация", "PromQL")
+    Rel(prometheus, alertmanager, "Алерты", "Alert Rules")
+
+    Container(cicd, "CI/CD Platform", "Jenkins/GitLab CI", "Автоматизация сборки и деплоя")
+    Container(registry, "Container Registry", "Harbor/ECR", "Хранилище Docker-образов")
+
+    Container(k8s, "Kubernetes Cluster", "k8s", "Оркестрация контейнеров")
+
+    Rel(cicd, registry, "Push образов", "Docker API")
+    Rel(cicd, k8s, "Deploy сервисов", "kubectl")
+    Rel(k8s, registry, "Pull образов", "Docker API")
+
+    Rel(k8s, domain_service, "Управление подами", "K8s API")
+}
+
+@enduml
